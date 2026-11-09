@@ -71,6 +71,24 @@
   a.open:hover{filter:brightness(1.1)}
   .checked{font-size:14.5px;color:var(--muted);margin-top:12px}
   .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 22px;color:var(--muted)}
+  .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  button.btn{font-family:inherit;font-size:16px;font-weight:600;padding:10px 18px;border-radius:9px;
+    cursor:pointer;border:1.5px solid var(--accent);background:var(--card);color:var(--accent)}
+  button.btn:hover{background:var(--bg)}
+  button.btn[aria-pressed="true"]{background:var(--strong-bg);border-color:var(--strong);color:var(--strong)}
+  button.btn.quiet{border-color:var(--line);color:var(--muted);font-weight:500}
+  .saved{background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:18px 20px;margin:0 0 24px}
+  .saved h2{margin:0 0 8px}
+  .saved .note{font-size:15.5px;color:var(--muted)}
+  .sitem{border-top:1px solid var(--line);padding:14px 0}
+  .sitem:last-of-type{padding-bottom:4px}
+  .sitem h3{font-size:17.5px;margin:0 0 2px;line-height:1.4}
+  .sitem .meta{font-size:15.5px;color:var(--muted);margin:0 0 8px}
+  .flag{font-size:15px;padding:8px 11px;border-radius:8px;margin:0 0 10px}
+  .flag.gone{background:var(--alert-bg);color:var(--alert)}
+  .flag.done{background:var(--strong-bg);color:var(--strong)}
+  a.open.small{font-size:15px;padding:9px 16px}
+  .savedtools{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
   footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);
     font-size:15px;color:var(--muted)}
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -91,10 +109,12 @@
       <li>Read <strong>Why this might suit you</strong> to see what the job involves.</li>
       <li>Check <strong>Pay</strong>, <strong>Where</strong> and <strong>Moving</strong>.</li>
       <li>To apply, press the blue <strong>Open the job advert</strong> button. It opens the employer's own page in a new tab.</li>
+      <li>To keep a job for later, press <strong>Save for later</strong>. It then appears in <strong>Jobs I saved</strong>, near the top of this page.</li>
     </ol>
     <p class="warn">Jobs can close quickly, sometimes within a day. If a button takes you to a page that says the job no longer exists, that job has closed. This is normal. It is not your mistake.</p>
   </section>
   <p class="status" id="status"></p>
+  <section class="saved" id="saved" aria-labelledby="saved-h"></section>
   <div id="filters">
     <fieldset><legend>Filter the list</legend>
       <div class="chips" id="chips"></div>
@@ -130,6 +150,82 @@ var META = __META__;
     if(!p || p==='Not listed' || p==='Not stated') return 'Not published';
     return p;
   }
+
+  /* ---- Saved jobs: kept in this browser only (localStorage) ---- */
+  var SKEY='kimle-saved-jobs-v1', savedEl=document.getElementById('saved');
+  var canStore=true, saved={};
+  try{ saved=JSON.parse(localStorage.getItem(SKEY)||'{}')||{}; }catch(e){ canStore=false; saved={}; }
+  function persist(){
+    try{ localStorage.setItem(SKEY,JSON.stringify(saved)); canStore=true; }catch(e){ canStore=false; }
+  }
+  function today(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+  var byUrl={}; JOBS.forEach(function(j){ if(j.status!=='closed') byUrl[j.url]=j; });
+  function toggleSave(url){
+    if(saved[url]){ delete saved[url]; }
+    else {
+      var j=byUrl[url]; if(!j) return;
+      saved[url]={title:j.title,employer:j.employer,location:j.location,pay:payOf(j),
+        closing:j.closing||'',url:j.url,savedOn:today(),applied:''};
+    }
+    persist(); renderSaved(); render();
+  }
+  function emailBody(){
+    var lines=['My saved jobs, copied from my job list on '+fmtDate(today())+'.',''];
+    savedList().forEach(function(s,i){
+      lines.push((i+1)+'. '+s.title+' — '+s.employer);
+      lines.push('   Where: '+(s.location||'Not stated'));
+      lines.push('   Pay: '+(s.pay||'Not published'));
+      if(s.applied) lines.push('   I marked this as applied on '+fmtDate(s.applied)+'.');
+      lines.push('   Advert: '+s.url);
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+  function savedList(){
+    return Object.keys(saved).map(function(k){ return saved[k]; })
+      .sort(function(a,b){ return (a.applied?1:0)-(b.applied?1:0) || String(b.savedOn).localeCompare(String(a.savedOn)); });
+  }
+  function renderSaved(){
+    var list=savedList(), h='<h2 id="saved-h">Jobs I saved ('+list.length+')</h2>';
+    if(!canStore){
+      h+='<p class="note">Saving does not work in this browser window. This can happen in a private window. '
+        +'Try opening this page in a normal window.</p>';
+    }
+    if(!list.length){
+      h+='<p class="note">You have not saved any jobs yet. Press <strong>Save for later</strong> on any job below, and it will appear here.</p>';
+    } else {
+      list.forEach(function(s){
+        var live=!!byUrl[s.url];
+        h+='<div class="sitem"><h3>'+esc(s.title)+'</h3>'
+          +'<p class="meta">'+esc(s.employer)+' · '+esc(s.location||'')+'<br>Pay: '+esc(s.pay||'Not published')
+          +'<br>You saved this on '+esc(fmtDate(s.savedOn))+'.</p>';
+        if(s.applied) h+='<p class="flag done">You marked this as applied on '+esc(fmtDate(s.applied))+'.</p>';
+        if(!live) h+='<p class="flag gone">This job is no longer on the list. It may have closed. Open the advert to check before you apply.</p>';
+        else if(s.closing) h+='<p class="flag gone">Closing date: '+esc(s.closing)+'.</p>';
+        h+='<div class="actions">'
+          +'<a class="open small" href="'+esc(s.url)+'" target="_blank" rel="noopener">Open the job advert</a>'
+          +'<button class="btn" data-act="applied" data-url="'+esc(s.url)+'" aria-pressed="'+(s.applied?'true':'false')+'">'
+          +(s.applied?'Applied ✓':'I have applied')+'</button>'
+          +'<button class="btn quiet" data-act="remove" data-url="'+esc(s.url)+'">Remove</button></div></div>';
+      });
+      h+='<div class="savedtools"><div class="actions">'
+        +'<button class="btn" data-act="email">Email my saved jobs to myself</button></div>'
+        +'<p class="note">This opens your email app with the list already written. Type your own email address in the "To" box, then send it.</p></div>';
+    }
+    h+='<p class="note">Your saved jobs stay in this browser, on this device only. They will not appear on a different phone or computer. '
+      +'If you clear your browser history, they will be deleted. To keep a copy, use <strong>Email my saved jobs to myself</strong>.</p>';
+    savedEl.innerHTML=h;
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-act]'); if(!b) return;
+    var act=b.dataset.act, url=b.dataset.url;
+    if(act==='save') toggleSave(url);
+    else if(act==='remove'){ delete saved[url]; persist(); renderSaved(); render(); }
+    else if(act==='applied'){ if(saved[url]){ saved[url].applied=saved[url].applied?'':today(); persist(); renderSaved(); } }
+    else if(act==='email'){
+      window.location.href='mailto:?subject='+encodeURIComponent('My saved jobs')+'&body='+encodeURIComponent(emailBody());
+    }
+  });
 
   function buildChips(){
     var defs=[{g:'match',v:'Strong match',t:'Strong matches only'},
@@ -186,8 +282,11 @@ var META = __META__;
       h+='</dl>';
       if(j.closing) h+='<p class="closing">Closing date: '+esc(j.closing)+'. Apply before this date.</p>';
       if(j.fit) h+='<div class="why"><strong>Why this might suit you</strong>'+esc(j.fit)+'</div>';
-      h+='<div class="next"><strong>What to do next</strong>'
+      var isSaved=!!saved[j.url];
+      h+='<div class="next"><strong>What to do next</strong><div class="actions">'
         +'<a class="open" href="'+esc(j.url)+'" target="_blank" rel="noopener">Open the job advert</a>'
+        +'<button class="btn" data-act="save" data-url="'+esc(j.url)+'" aria-pressed="'+(isSaved?'true':'false')+'">'
+        +(isSaved?'Saved ✓ (press to remove)':'Save for later')+'</button></div>'
         +'<p class="checked">Found '+esc(fmtDate(j.firstSeen))
         +'. Last checked '+esc(fmtDate(j.lastVerified))+'.</p></div>';
       return h+'</article>';
@@ -206,6 +305,7 @@ var META = __META__;
     Object.keys(active).forEach(function(k){ if(!active[k]) delete active[k]; });
     render();
   });
+  renderSaved();
   render();
 })();
 </script>
